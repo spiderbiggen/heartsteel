@@ -1,55 +1,46 @@
 #![deny(clippy::all)]
 #![warn(clippy::pedantic)]
 
-use std::ops::Deref;
-use std::time::Duration;
-
 use reqwest::IntoUrl;
 use serde::de::DeserializeOwned;
 use tracing::instrument;
 
+pub use resources::*;
+
 pub use crate::error::Error;
 
-pub mod skins;
 pub mod error;
+pub mod version;
+mod resources;
 
-#[derive(Debug, Clone)]
-pub struct Client {
-    inner: reqwest::Client,
-}
+const RAW_COMMUNITY_DRAGON_URL: &str = "https://raw.communitydragon.org";
+const CDN_COMMUNITY_DRAGON_URL: &str = "https://cdn.communitydragon.org";
 
-const DEFAULT_TIMEOUT: u64 = 5;
+#[cfg(feature = "client")]
+pub mod client {
+    use std::time::Duration;
 
-impl Client {
-    pub fn new() -> Result<Self, reqwest::Error> {
-        Self::new_with_timeout(Duration::from_secs(DEFAULT_TIMEOUT))
+    const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+
+    pub fn new() -> Result<reqwest::Client, reqwest::Error> {
+        new_with_timeout(DEFAULT_TIMEOUT)
     }
 
 
-    pub fn new_with_timeout(timeout: Duration) -> Result<Self, reqwest::Error> {
-        let client = reqwest::Client::builder()
+    pub fn new_with_timeout(timeout: Duration) -> Result<reqwest::Client, reqwest::Error> {
+        reqwest::Client::builder()
             .timeout(timeout)
-            .build()?;
-        Ok(Client { inner: client })
-    }
-}
-
-impl Deref for Client {
-    type Target = reqwest::Client;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+            .build()
     }
 }
 
 #[instrument(skip_all, fields(http.uri = uri.as_str()), err)]
-pub async fn get<C, U, T>(client: C, uri: U) -> Result<T, Error>
+pub(crate) async fn get<U, T>(client: &reqwest::Client, uri: U) -> Result<T, Error>
     where
-        C: AsRef<reqwest::Client>,
         U: IntoUrl,
         T: DeserializeOwned,
 {
-    let response = client.as_ref().get(uri).send().await?;
+    let response = client.get(uri).send().await?;
     match response.error_for_status_ref() {
         Ok(_) => Ok(response.json().await?),
         Err(error) => {
